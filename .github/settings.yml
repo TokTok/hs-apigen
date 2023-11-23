@@ -1,0 +1,15 @@
+---
+_extends: .github
+
+repository:
+  name: hs-apigen
+  description: FFI API generator for TokTok style C API headers.
+  topics: c, ffi, codegen
+
+branches:
+  - name: "master"
+    protection:
+      required_status_checks:
+        contexts:
+          - "bazel-opt"
+          - "build / stack"
