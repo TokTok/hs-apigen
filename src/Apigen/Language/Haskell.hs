@@ -7,16 +7,16 @@ module Apigen.Language.Haskell where
 
 import           Control.Monad.State.Strict  (State)
 import qualified Control.Monad.State.Strict  as State
-import           Data.Maybe                  (catMaybes)
 import           Data.Fix                    (Fix (..))
+import           Data.Maybe                  (catMaybes)
 import           Data.Text                   (Text)
 import qualified Data.Text                   as Text
 import           Language.Cimple             (Lexeme (..), LexemeClass (..),
-                                              Node, NodeF (..), UnaryOp (..),
-                                              lexemeText)
+                                              Node, NodeF (..))
 import           Language.Cimple.TraverseAst (AstActions, astActions, doNode,
                                               traverseAst)
 import qualified Text.Casing                 as Casing
+
 
 joinLines :: [Text] -> Text
 joinLines = Text.intercalate "\n"
@@ -55,9 +55,9 @@ genStdType :: Text -> Text
 genStdType "uint16_t" = "Word16"
 genStdType "uint32_t" = "Word32"
 genStdType "uint64_t" = "Word64"
-genStdType "size_t" = "CSize"
-genStdType "bool" = "Bool"
-genStdType tyName = error $ show tyName
+genStdType "size_t"   = "CSize"
+genStdType "bool"     = "Bool"
+genStdType tyName     = error $ show tyName
 
 
 genType :: Node (Lexeme Text) -> Text
@@ -96,7 +96,7 @@ genType ty = error $ show ty
 
 genArg :: Node (Lexeme Text) -> Text
 genArg (Fix (VarDecl ty _ _)) = genType ty
-genArg arg = error $ show arg
+genArg arg                    = error $ show arg
 
 
 genArgs :: [Node (Lexeme Text)] -> Text
@@ -120,9 +120,9 @@ genFuncType retTy name args = joinLines
 
 
 genEnumerator :: Node (Lexeme Text) -> Maybe Text
-genEnumerator (Fix Comment{}) = Nothing
+genEnumerator (Fix Comment{})                   = Nothing
 genEnumerator (Fix (Enumerator (L _ _ name) _)) = Just $ idToHaskell name
-genEnumerator x = error $ show x
+genEnumerator x                                 = error $ show x
 
 
 genEnum :: Text -> [Node (Lexeme Text)] -> Text
@@ -135,7 +135,7 @@ genEnum name enums = joinLines $
 
 linter :: AstActions (State [Text]) Text
 linter = astActions
-    { doNode = \file node act ->
+    { doNode = \_file node act ->
         case unFix node of
             FunctionDecl _ (Fix (FunctionPrototype retTy (L _ _ name) args)) ->
                 State.modify (genFunction retTy name args:)
