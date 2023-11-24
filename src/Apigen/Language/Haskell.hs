@@ -119,34 +119,86 @@ genFuncType retTy name args = joinLines
     hsName = idToHaskell name
 
 
-genEnumerator :: Node (Lexeme Text) -> Maybe Text
-genEnumerator (Fix Comment{})                   = Nothing
-genEnumerator (Fix (Enumerator (L _ _ name) _)) = Just $ idToHaskell name
-genEnumerator x                                 = error $ show x
+genEnumerator :: Bool -> Node (Lexeme Text) -> Maybe Text
+genEnumerator isErr (Fix (Enumerator (L _ _ name) _))
+    -- Skip the OK error, because we process that in CErr handling.
+    | isErr && "_OK" `Text.isSuffixOf` name = Nothing
+    | otherwise                             = Just $ idToHaskell name
+genEnumerator _ (Fix Comment{}) = Nothing
+genEnumerator _ x = error $ show x
 
 
 genEnum :: Text -> [Node (Lexeme Text)] -> Text
 genEnum name enums = joinLines $
-    [ "data " <> idToHaskell name
-    , "    = " <> Text.intercalate "\n    | " (catMaybes (map genEnumerator enums))
-    , "    deriving (Eq, Ord, Enum, Bounded, Read, Show)"
+    [ "data " <> hsName
+    , "    = " <> Text.intercalate "\n    | " (catMaybes (map (genEnumerator (isErrorEnum name)) enums))
+    , "    deriving (Eq, Ord, Enum, Bounded, Read, Show, Generic)"
+    , "instance MessagePack " <> hsName
+    , "instance Arbitrary " <> hsName <> " where arbitrary = arbitraryBoundedEnum"
     ]
+  where
+    hsName = idToHaskell name
 
 
-linter :: AstActions (State [Text]) Text
-linter = astActions
+genStruct :: Text -> Text
+genStruct name = joinLines $
+    [ "data " <> structName
+    , "type " <> ptrName <> " = Ptr " <> structName
+    ]
+  where
+    structName = idToHaskell name <> "Struct"
+    ptrName    = idToHaskell name <> "Ptr"
+
+
+generator :: AstActions (State [Text]) Text
+generator = astActions
     { doNode = \_file node act ->
         case unFix node of
             FunctionDecl _ (Fix (FunctionPrototype retTy (L _ _ name) args)) ->
                 State.modify (genFunction retTy name args:)
+            Struct (L _ _ name) _ ->
+                State.modify (genStruct name:)
+            Typedef _ (L _ _ name) ->
+                State.modify (genStruct name:)
             TypedefFunction (Fix (FunctionPrototype retTy (L _ _ name) args)) ->
                 State.modify (genFuncType retTy name args:)
             EnumDecl (L _ _ name) enums _ ->
+                State.modify (genEnum name enums:)
+            EnumConsts (Just (L _ _ name)) enums ->
                 State.modify (genEnum name enums:)
 
             _ -> act
     }
 
 
+addPrologue :: FilePath -> [Text] -> [Text]
+addPrologue file = (
+    [ "{-# LANGUAGE DeriveGeneric #-}"
+    , "module " <> hsModuleName file <> " where"
+    , ""
+    , "import           Data.MessagePack          (MessagePack)"
+    , "import           Data.Word                 (Word16, Word32, Word64)"
+    , "import           Foreign.C.Enum            (CEnum (..), CErr)"
+    , "import           Foreign.C.String          (CString)"
+    , "import           Foreign.C.Types           (CInt (..), CSize (..))"
+    , "import           Foreign.Ptr               (FunPtr, Ptr)"
+    , "import           GHC.Generics              (Generic)"
+    , "import           Test.QuickCheck.Arbitrary (Arbitrary (..),"
+    , "                                            arbitraryBoundedEnum)"
+    , ""
+    ]++)
+  where
+    hsModuleName =
+        ("FFI."<>)
+        . Text.intercalate "."
+        . map (Text.pack . Casing.toPascal . Casing.Identifier . (:[]) . Text.unpack)
+        . reverse . take 2 . reverse  -- takeEnd from extra
+        . Text.splitOn "/"
+        . Text.dropEnd 2
+        . Text.pack
+
+
 generate :: (FilePath, [Node (Lexeme Text)]) -> (FilePath, Text)
-generate = ("file.hs",) . joinLines . reverse . flip State.execState [] . traverseAst linter
+generate input@(file, _) = go input
+  where
+    go = (file,) . joinLines . addPrologue file . reverse . flip State.execState [] . traverseAst generator
