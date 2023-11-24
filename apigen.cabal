@@ -1,5 +1,5 @@
 name:          apigen
-version:       0.0.1
+version:       0.0.2
 synopsis:      FFI API generator for several languages
 description:   Supports a specific way of defining C APIs and generates bindings for various languages for them.
 homepage:      https://toktok.github.io/apigen

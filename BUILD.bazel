@@ -8,7 +8,7 @@ haskell_library(
     name = "hs-apigen",
     srcs = glob(["src/**/*.*hs"]),
     src_strip_prefix = "src",
-    version = "0.0.1",
+    version = "0.0.2",
     visibility = ["//visibility:public"],
     deps = [
         "//hs-cimple",
