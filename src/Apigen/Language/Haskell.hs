@@ -174,6 +174,7 @@ generator = astActions
 addPrologue :: FilePath -> [Text] -> [Text]
 addPrologue file = (
     [ "{-# LANGUAGE DeriveGeneric #-}"
+    , "{-# OPTIONS_GHC -Wno-unused-imports #-}"
     , "module " <> hsModuleName file <> " where"
     , ""
     , "import           Data.MessagePack          (MessagePack)"
@@ -185,7 +186,7 @@ addPrologue file = (
     , "import           GHC.Generics              (Generic)"
     , "import           Test.QuickCheck.Arbitrary (Arbitrary (..),"
     , "                                            arbitraryBoundedEnum)"
-    , ""
+    , if "tox/tox_events.h" `Text.isSuffixOf` Text.pack file then "import FFI.Tox.Tox" else ""
     ]++)
   where
     hsModuleName =
