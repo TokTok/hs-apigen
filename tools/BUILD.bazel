@@ -12,3 +12,18 @@ haskell_binary(
         "//third_party/haskell:text",
     ],
 )
+
+haskell_binary(
+    name = "dump-model",
+    srcs = ["dump-model.hs"],
+    tags = ["no-cross"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//hs-apigen",
+        "//hs-cimple",
+        "//third_party/haskell:aeson",
+        "//third_party/haskell:base",
+        "//third_party/haskell:bytestring",
+        "//third_party/haskell:text",
+    ],
+)

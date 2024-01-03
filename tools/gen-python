@@ -1,0 +1,315 @@
+#!/usr/bin/env python3
+import os.path
+import pprint
+import subprocess
+import sys
+import tempfile
+from dataclasses import dataclass
+from dataclasses import field
+from typing import Iterable
+from typing import Optional
+
+import apigen
+
+# Set to True to type-check the generated model.
+MYPY = False
+
+
+def _relocate_err(ns: tuple[str, ...], name: tuple[str, ...]):
+    if ns and name and name[0].lower() == "err":
+        return (ns[0], name[0]) + ns[1:] + name[1:]
+    return ns + name
+
+
+def _relocate_callback(ns: tuple[str, ...], name: tuple[str, ...]):
+    if ns and name and name[0].lower() == "callback":
+        return (ns[0], name[0]) + ns[1:] + name[1:]
+    return ns + name
+
+
+def _camel(ns: tuple[str, ...], name: list[str]) -> str:
+    return "_".join(n.capitalize() for n in _relocate_err(ns, tuple(name)))
+
+
+def _snake(ns: tuple[str, ...], name: list[str]) -> str:
+    return "_".join(n.lower() for n in _relocate_err(ns, tuple(name)))
+
+
+def _scream(ns: tuple[str, ...], name: list[str]) -> str:
+    return "_".join(n.upper() for n in _relocate_err(ns, tuple(name)))
+
+
+@dataclass
+class GenPython:
+    ns: tuple[str, ...] = tuple()
+    prelude: list[str] = field(default_factory=list)
+    enums: list[str] = field(default_factory=list)
+    typedefs: list[str] = field(default_factory=list)
+    callbacks: list[str] = field(default_factory=list)
+    funcs: list[str] = field(default_factory=list)
+    indent: int = 0
+    in_prop: bool = False
+    in_class: Optional[apigen.Name] = None
+
+    def _add(self, lines: list[str], *added: str):
+        lines.extend(" " * (self.indent * 4) + line for line in added)
+
+    def make_typename(self, name: apigen.Name) -> str:
+        return _camel(tuple(name.ns), name.name)
+
+    def make_identifier(self, name: apigen.Name) -> str:
+        return _snake(tuple(name.ns), name.name)
+
+    def make_this(self, const: bool) -> str:
+        if not self.in_class:
+            raise Exception("not in class")
+        return f"{'const ' if const else ''}{self.make_typename(self.in_class)}* self"
+
+    def make_param(self, param: apigen.Var) -> str:
+        if (isinstance(param.type, apigen.SizedArrayType)
+                and isinstance(param.type.size, apigen.Ref)
+                and not param.type.size.name.ns):
+            return f"{self.make_type(param.type.type)}* {self.make_identifier(param.name)}, size_t {self.make_identifier(param.type.size.name)}"
+        else:
+            return f"{self.make_type(param.type)} {self.make_identifier(param.name)}"
+
+    def make_params(self, params: list[apigen.Var]) -> list[str]:
+        return [self.make_param(param) for param in params]
+
+    def make_type(self, ty: apigen.Decl) -> str:
+        if isinstance(ty, apigen.BuiltinType):
+            return self.make_c_type(ty.type)
+        if isinstance(ty, apigen.Typename):
+            return self.make_typename(ty.name)
+        if isinstance(ty, apigen.CallbackType):
+            return f"{self.make_identifier(ty.type)}*"
+        if isinstance(ty, apigen.SizedArrayType):
+            return f"{self.make_type(ty.type)}*"
+        if isinstance(ty, apigen.PointerType):
+            return f"{self.make_typename(ty.type)}*"
+        if isinstance(ty, apigen.ConstPointerType):
+            return f"const {self.make_typename(ty.type)}*"
+        if isinstance(ty, apigen.ArrayType):
+            return f"{self.make_c_type(ty.type)}*"
+        if isinstance(ty, apigen.ConstArrayType):
+            return f"const {self.make_c_type(ty.type)}*"
+        if isinstance(ty, apigen.ConstType):
+            return f"const {self.make_type(ty.type)}"
+        raise Exception(f"unhandled type: {ty}")
+
+    def make_c_type(self, ty: apigen.CType) -> str:
+        if ty == apigen.Void:
+            return "void"
+        if ty == apigen.VoidPtr:
+            return "void*"
+        if ty == apigen.Bool:
+            return "bool"
+        if ty == apigen.SizeT:
+            return "size_t"
+        if ty == apigen.String:
+            return "const char*"
+        if isinstance(ty, apigen.SInt):
+            return f"int{ty.bitSize}_t"
+        if isinstance(ty, apigen.UInt):
+            return f"uint{ty.bitSize}_t"
+        raise Exception(f"unhandled type: {ty}")
+
+    def genModel(self, model: apigen.Model) -> dict[str, str]:
+        if len(model.modules) == 1:
+            basedir = os.path.dirname(model.modules[0].path)
+        else:
+            basedir = os.path.commonprefix(tuple(
+                m.path for m in model.modules)).rpartition("/")[0]
+
+        mods = {}
+        for module in model.modules:
+            self.prelude = [
+                "# cython: language_level=3",
+                "from libcpp cimport bool",
+                "from libc.stdint cimport uint8_t, uint16_t, uint32_t, uint64_t, int16_t, int32_t",
+                "from libc.stdlib cimport malloc, free",
+                "",
+            ]
+            self.enums = []
+            self.typedefs = []
+            self.callbacks = []
+            self.funcs = []
+            basename = os.path.splitext(module.path[len(basedir) + 1:])[0]
+            if basename == "toxav/toxav":
+                self.prelude.append("from pytox.toxcore.tox cimport Tox")
+            self.genModule(module)
+            mods[basename + ".pxd"] = (
+                "\n".join(self.prelude + self.enums + self.typedefs +
+                          self.callbacks + self.funcs) + "\n")
+        return mods
+
+    def genModule(self, module: apigen.Module):
+        header = os.path.join("tox", os.path.basename(module.path))
+        self._add(self.prelude, f'cdef extern from "{header}":')
+        self.indent += 1
+        for decl in module.decls:
+            self.genDecl(decl)
+        self.indent -= 1
+
+    def genNamespace(self, decl: apigen.Namespace):
+        ns = self.ns
+        self.ns += tuple(decl.name)
+        for mem in decl.mems:
+            self.genDecl(mem)
+        self.ns = ns
+
+    def genEnumeration(self, decl: apigen.Enumeration):
+        self._add(self.enums, f"cpdef enum {self.make_typename(decl.name)}:")
+        self.indent += 1
+        ns = self.ns
+        if decl.name.name[0] == "Err":
+            self.ns = (tuple([self.ns[0], decl.name.name[0]]) +
+                       tuple(self.ns[1:]) + tuple(decl.name.name[1:]))
+        else:
+            self.ns = tuple(self.ns) + tuple(decl.name.name)
+        for mem in decl.mems:
+            self.genEnumMember(mem)
+        self.ns = ns
+        self.indent -= 1
+
+    def genEnumMember(self, decl: apigen.EnumMember):
+        self._add(self.enums, f"{_scream(self.ns, decl.name.name)}")
+
+    def genClassDecl(self, decl: apigen.ClassDecl):
+        self._add(self.typedefs,
+                  f"ctypedef struct {self.make_typename(decl.name)}")
+
+        self.in_class = decl.name
+        ns = self.ns
+        self.ns += tuple(decl.name.name)
+        for mem in decl.mems:
+            self.genDecl(mem)
+        self.ns = ns
+        self.in_class = None
+
+    def genProperty(self, decl: apigen.Property):
+        self.in_prop = True
+        self.genDecl(decl.prop)
+        self.in_prop = False
+
+    def genValueProp(self, decl: apigen.ValueProp):
+        if decl.get:
+            self.genDecl(decl.get)
+        if decl.set:
+            self.genDecl(decl.set)
+
+    def genArrayProp(self, decl: apigen.ArrayProp):
+        if decl.get:
+            self.genDecl(decl.get)
+        if decl.set:
+            self.genDecl(decl.set)
+        if decl.size:
+            self.genDecl(decl.size)
+
+    def genMethod(self, decl: apigen.Method):
+        name = _relocate_callback(tuple(decl.name.ns), tuple(decl.name.name))
+        self._add(
+            self.funcs,
+            f"cdef {self.make_type(decl.ret)} {'_'.join(name)}({', '.join([self.make_this(decl.const)] + self.make_params(decl.params))})",
+        )
+
+    def genConstructor(self, decl: apigen.Constructor):
+        if not self.in_class:
+            raise Exception("not in class")
+        self._add(
+            self.funcs,
+            f"cdef {self.make_typename(self.in_class)}* {self.make_identifier(decl.name)}({', '.join(self.make_params(decl.params))})",
+        )
+
+    def genDestructor(self, decl: apigen.Destructor):
+        if not self.in_class:
+            raise Exception("not in class")
+        self._add(
+            self.funcs,
+            f"cdef void {self.make_identifier(decl.name)}({', '.join([self.make_typename(self.in_class) + '* self'] + self.make_params(decl.params))})",
+        )
+
+    def genFunction(self, decl: apigen.Function):
+        self._add(
+            self.funcs,
+            f"cdef {self.make_type(decl.ret)} {self.make_identifier(decl.name)}({', '.join(self.make_params(decl.params))})",
+        )
+
+    def genDefine(self, decl: apigen.Define):
+        pass  # skip
+
+    def genCallbackTypeDecl(self, decl: apigen.CallbackTypeDecl):
+        self._add(
+            self.callbacks,
+            f"ctypedef void {self.make_identifier(decl.name)}({', '.join(self.make_params(decl.params))})",
+        )
+
+    def genIdTypeDecl(self, decl: apigen.IdTypeDecl):
+        self._add(self.typedefs,
+                  f"ctypedef uint32_t {self.make_typename(decl.name)}")
+
+    def genDecl(self, decl: apigen.Decl):
+        if isinstance(decl, apigen.Namespace):
+            self.genNamespace(decl)
+        elif isinstance(decl, apigen.ClassDecl):
+            self.genClassDecl(decl)
+        elif isinstance(decl, apigen.Property):
+            self.genProperty(decl)
+        elif isinstance(decl, apigen.ValueProp):
+            self.genValueProp(decl)
+        elif isinstance(decl, apigen.ArrayProp):
+            self.genArrayProp(decl)
+        elif isinstance(decl, apigen.Method):
+            self.genMethod(decl)
+        elif isinstance(decl, apigen.Enumeration):
+            self.genEnumeration(decl)
+        elif isinstance(decl, apigen.Constructor):
+            self.genConstructor(decl)
+        elif isinstance(decl, apigen.Destructor):
+            self.genDestructor(decl)
+        elif isinstance(decl, apigen.Define):
+            self.genDefine(decl)
+        elif isinstance(decl, apigen.Function):
+            self.genFunction(decl)
+        elif isinstance(decl, apigen.CallbackTypeDecl):
+            self.genCallbackTypeDecl(decl)
+        elif isinstance(decl, apigen.IdTypeDecl):
+            self.genIdTypeDecl(decl)
+        else:
+            raise Exception(f"unhandled type: {decl.__class__}")
+
+
+def main() -> None:
+    out = sys.argv[1]
+    srcs = [os.path.realpath(arg) for arg in sys.argv[2:]]
+
+    workspace = os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+    if os.path.exists(os.path.join(workspace, "bazel-bin")):
+        model_code = subprocess.run(
+            ["bazel", "run", "//hs-apigen/tools:dump-model", "--", "-py", "-"]
+            + srcs,
+            capture_output=True,
+            check=True,
+        ).stdout.decode("utf-8")
+    else:
+        print("bazel is required")
+        sys.exit(1)
+
+    if MYPY:
+        with tempfile.NamedTemporaryFile(suffix=".py") as tmp:
+            tmp.write(b"import apigen\n")
+            tmp.write(model_code.encode("utf-8"))
+            subprocess.run(
+                ["mypy", "--config-file=/src/workspace/mypy.ini", tmp.name],
+                check=True,
+            )
+
+    model: apigen.Model = eval(model_code)
+    for file, content in GenPython().genModel(model).items():
+        with open(os.path.join(out, file), "w") as fh:
+            fh.write(content)
+
+
+if __name__ == "__main__":
+    main()
