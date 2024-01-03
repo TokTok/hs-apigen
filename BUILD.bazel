@@ -13,11 +13,16 @@ haskell_library(
     visibility = ["//visibility:public"],
     deps = [
         "//hs-cimple",
+        "//third_party/haskell:aeson",
+        "//third_party/haskell:ansi-wl-pprint",
         "//third_party/haskell:base",
         "//third_party/haskell:casing",
         "//third_party/haskell:data-fix",
+        "//third_party/haskell:extra",
+        "//third_party/haskell:insert-ordered-containers",
         "//third_party/haskell:mtl",
         "//third_party/haskell:text",
+        "//third_party/haskell:unordered-containers",
     ],
 )
 

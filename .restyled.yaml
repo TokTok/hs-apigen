@@ -1,0 +1,4 @@
+restylers:
+  - pyment:
+      enabled: false
+  - "*"
