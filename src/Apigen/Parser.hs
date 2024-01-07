@@ -60,6 +60,9 @@ runSimplify decls = do
 go :: NodeF (Lexeme SId) [Sym] -> M a [Sym]
 -- {-
 go (PreprocInclude (L _ LitSysInclude _)) = return []
+go (TyPointer [ConstType (BuiltinType UInt{}) ]) = return []
+go (VarDecl [] _ []) = return []
+go (FunctionPrototype [] _ _) = return []
 
 go (PreprocIfndef (L _ _ SYM_APIGEN_IGNORE) _ es) = return es
 
@@ -74,10 +77,9 @@ go (Enumerator name _) = return [EnumMember name]
 go (EnumConsts (Just name) enums  ) = mkEnum name enums
 go (EnumDecl         name  enums _) = mkEnum name enums
 
-go (TyPointer [           BuiltinType ty@UInt{}  ]) = return [     ArrayType ty]
-go (TyPointer [ConstType (BuiltinType ty@UInt{}) ]) = return [ConstArrayType ty]
-go (TyPointer [ConstType (BuiltinType    Char   )]) = return [BuiltinType String]
-go (TyPointer [ConstType (Typename ty           )]) = return [ConstPointerType ty]
+go (TyPointer [ConstType (BuiltinType Char)]) = return [BuiltinType String]
+go (TyPointer [           Typename ty      ]) = return [     PointerType ty]
+go (TyPointer [ConstType (Typename ty     )]) = return [ConstPointerType ty]
 
 go (DeclSpecArray (Just [expr]))                                  = return [SizedArrayType (BuiltinType Void) expr]
 go (DeclSpecArray Nothing)                                        = return [ArrayType Void]
@@ -93,7 +95,6 @@ go (FunctionCall [Ref (L _ _ SYM_max)] [[a], [b]]) = return [Max a b]
 
 go (TyConst [ty])                  = return [ConstType ty]
 go (TyPointer [BuiltinType Void])  = return [BuiltinType VoidPtr]
-go (TyPointer [Typename ty])       = return [PointerType ty]
 go (TyPointer ty@[CallbackType{}]) = return ty
 
 go (AggregateDecl ty@[TypeDecl _]) = return ty
@@ -103,18 +104,18 @@ go (TyUserDefined ty)              = return [Typename ty]
 go (TyFunc ty)                     = return [CallbackType ty]
 go (Typedef [Typename ty] _)       = return [TypeDecl ty]
 
-go (TyStd (L _ _ TY_void))         = return [BuiltinType Void]
-go (TyStd (L _ _ TY_char))         = return [BuiltinType Char]
-go (TyStd (L _ _ TY_bool))         = return [BuiltinType Bool]
-go (TyStd (L _ _ TY_int8_t))       = return [BuiltinType (SInt B8)]
-go (TyStd (L _ _ TY_uint8_t))      = return [BuiltinType (UInt B8)]
-go (TyStd (L _ _ TY_int16_t))      = return [BuiltinType (SInt B16)]
+go (TyStd (L _ _ TY_void    ))     = return [BuiltinType Void]
+go (TyStd (L _ _ TY_char    ))     = return [BuiltinType Char]
+go (TyStd (L _ _ TY_bool    ))     = return [BuiltinType Bool]
+go (TyStd (L _ _ TY_int8_t  ))     = return [BuiltinType (SInt B8)]
+go (TyStd (L _ _ TY_uint8_t ))     = return [BuiltinType (UInt B8)]
+go (TyStd (L _ _ TY_int16_t ))     = return [BuiltinType (SInt B16)]
 go (TyStd (L _ _ TY_uint16_t))     = return [BuiltinType (UInt B16)]
-go (TyStd (L _ _ TY_int32_t))      = return [BuiltinType (SInt B32)]
+go (TyStd (L _ _ TY_int32_t ))     = return [BuiltinType (SInt B32)]
 go (TyStd (L _ _ TY_uint32_t))     = return [BuiltinType (UInt B32)]
-go (TyStd (L _ _ TY_int64_t))      = return [BuiltinType (SInt B64)]
+go (TyStd (L _ _ TY_int64_t ))     = return [BuiltinType (SInt B64)]
 go (TyStd (L _ _ TY_uint64_t))     = return [BuiltinType (UInt B64)]
-go (TyStd (L _ _ TY_size_t))       = return [BuiltinType SizeT]
+go (TyStd (L _ _ TY_size_t  ))     = return [BuiltinType SizeT]
 
 go (PreprocDefineConst name _)     = return [Define name]
 go (VarDecl [ty] name [])          = return [Var ty name]

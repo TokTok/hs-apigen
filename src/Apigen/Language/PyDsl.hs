@@ -12,7 +12,7 @@ import           Apigen.Types                 (BitSize (..), BuiltinType (..),
                                                Module (..))
 import           Data.Text                    (Text)
 import qualified Data.Text                    as Text
-import           Language.Cimple              (Lexeme (..), lexemeText)
+import           Language.Cimple              (Lexeme (..), LexemeClass)
 import           Prelude                      hiding ((<$>))
 import           Text.PrettyPrint.ANSI.Leijen
 
@@ -88,7 +88,7 @@ ppConstness ConstThis   = text "True"
 ppConstness MutableThis = text "False"
 
 ppGenerated :: Generated -> Doc
-ppGenerated = ppCtor . show
+ppGenerated = ppCtor . ("Generated." <>) . show
 
 ppBuiltinType :: BuiltinType -> Doc
 ppBuiltinType Void      = ppCtor "Void"
@@ -111,10 +111,14 @@ ppMaybe _ Nothing  = text "None"
 ppMaybe f (Just x) = f x
 
 ppLexeme :: Lexeme Name -> Doc
-ppLexeme = ppName . lexemeText
+ppLexeme (L _ c s) = ppName c s
 
-ppName :: Name -> Doc
-ppName (ns, name) = hgo "Name" [ppList (text . show) ns, ppList (text . show) name]
+ppName :: LexemeClass -> Name -> Doc
+ppName c (ns, name) = hgo "Name"
+    [ ppCtor . ("LexemeClass." <>) . show $ c
+    , ppList (text . show) ns
+    , ppList (text . show) name
+    ]
 
 renderS :: Doc -> String
 renderS = flip displayS "" . renderSmart 1 120

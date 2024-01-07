@@ -3,6 +3,19 @@ from enum import Enum
 from typing import Optional
 
 
+class Generated(Enum):
+    GeneratedToString = 0
+    GeneratedFromInt = 1
+
+
+class LexemeClass(Enum):
+    IdVar = 0
+    IdConst = 1
+    IdSueType = 2
+    IdFuncType = 3
+    LitInteger = 4
+
+
 class CType:
     pass
 
@@ -31,21 +44,17 @@ class UInt(CType):
 
 
 @dataclass
-class Generated:
-    function: str
-
-
-GeneratedToString = Generated("to_string")
-GeneratedFromInt = Generated("from_int")
-
-
-@dataclass
 class Name:
+    kind: LexemeClass
     ns: list[str]
     name: list[str]
 
 
 class Decl:
+    pass
+
+
+class Type(Decl):
     pass
 
 
@@ -74,24 +83,26 @@ class Enumeration(Decl):
 
 
 @dataclass
+class Prop(Decl):
+    type: Decl
+    get: Optional[Decl]
+    set: Optional[Decl]
+
+
+@dataclass
+class ValueProp(Prop):
+    pass
+
+
+@dataclass
+class ArrayProp(Prop):
+    size: Optional[Decl]
+
+
+@dataclass
 class Property(Decl):
     name: Name
-    prop: Decl
-
-
-@dataclass
-class ValueProp(Decl):
-    type: Decl
-    get: Optional[Decl]
-    set: Optional[Decl]
-
-
-@dataclass
-class ArrayProp(Decl):
-    type: Decl
-    get: Optional[Decl]
-    set: Optional[Decl]
-    size: Optional[Decl]
+    prop: Prop
 
 
 @dataclass
@@ -154,54 +165,54 @@ class Define(Decl):
 
 
 @dataclass
-class Typename(Decl):
+class Typename(Type):
     name: Name
 
 
 @dataclass
-class BuiltinType(Decl):
+class BuiltinType(Type):
     type: CType
 
 
 @dataclass
-class CallbackType(Decl):
+class CallbackType(Type):
     type: Name
 
 
 @dataclass
-class PointerType(Decl):
+class PointerType(Type):
     type: Name
 
 
 @dataclass
-class ConstPointerType(Decl):
+class ConstPointerType(Type):
     type: Name
 
 
 @dataclass
-class SizedArrayType(Decl):
-    type: Decl
+class SizedArrayType(Type):
+    type: Type
     size: Decl
 
 
 @dataclass
-class ArrayType(Decl):
+class ArrayType(Type):
     type: CType
 
 
 @dataclass
-class UserArrayType(Decl):
+class UserArrayType(Type):
     type: Name
 
 
 @dataclass
-class ConstArrayType(Decl):
+class ConstArrayType(Type):
     type: CType
 
 
 @dataclass
-class ConstType(Decl):
-    type: Decl
+class ConstType(Type):
+    type: Type
 
 
 @dataclass
