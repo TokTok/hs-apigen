@@ -83,36 +83,8 @@ class Enumeration(Decl):
 
 
 @dataclass
-class Prop(Decl):
-    type: Decl
-    get: Optional[Decl]
-    set: Optional[Decl]
-
-
-@dataclass
-class ValueProp(Prop):
-    pass
-
-
-@dataclass
-class ArrayProp(Prop):
-    size: Optional[Decl]
-
-
-@dataclass
-class Property(Decl):
-    name: Name
-    prop: Prop
-
-
-@dataclass
-class Ref(Decl):
-    name: Name
-
-
-@dataclass
 class Var(Decl):
-    type: Decl
+    type: Type
     name: Name
 
 
@@ -216,54 +188,86 @@ class ConstType(Type):
 
 
 @dataclass
-class Paren(Decl):
-    expr: Decl
+class Prop(Decl):
+    type: Type
+    get: Optional[Method]
+    set: Optional[Method]
 
 
 @dataclass
-class IntVal(Decl):
+class ValueProp(Prop):
+    pass
+
+
+@dataclass
+class ArrayProp(Prop):
+    size: Optional[Method]
+
+
+@dataclass
+class Property(Decl):
+    name: Name
+    prop: Prop
+
+
+class Expr(Decl):
+    pass
+
+
+@dataclass
+class Ref(Expr):
+    name: Name
+
+
+@dataclass
+class Paren(Expr):
+    expr: Expr
+
+
+@dataclass
+class IntVal(Expr):
     val: Name
 
 
 @dataclass
-class Abs(Decl):
-    expr: Decl
+class Abs(Expr):
+    expr: Expr
 
 
 @dataclass
-class Max(Decl):
-    arg1: Decl
-    arg2: Decl
+class Max(Expr):
+    arg1: Expr
+    arg2: Expr
 
 
 @dataclass
-class Add(Decl):
-    left: Decl
-    right: Decl
+class Add(Expr):
+    left: Expr
+    right: Expr
 
 
 @dataclass
-class Sub(Decl):
-    left: Decl
-    right: Decl
+class Sub(Expr):
+    left: Expr
+    right: Expr
 
 
 @dataclass
-class Mul(Decl):
-    left: Decl
-    right: Decl
+class Mul(Expr):
+    left: Expr
+    right: Expr
 
 
 @dataclass
-class Div(Decl):
-    left: Decl
-    right: Decl
+class Div(Expr):
+    left: Expr
+    right: Expr
 
 
 @dataclass
 class Module:
     path: str
-    decls: list[Decl]
+    decls: list[Namespace]
 
 
 @dataclass
