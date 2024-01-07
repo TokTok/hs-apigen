@@ -3,6 +3,7 @@ import os.path
 import subprocess
 import sys
 import tempfile
+from collections import OrderedDict
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Iterable
@@ -26,8 +27,6 @@ _array_typecode = {
 def _order_types_first(decl: apigen.Decl) -> int:
     if isinstance(decl, apigen.Enumeration):
         return 0
-    if isinstance(decl, apigen.CallbackTypeDecl):
-        return 1
     return 100
 
 
@@ -57,13 +56,15 @@ def _is_void_ptr(param: apigen.Var) -> bool:
             and param.type.type is apigen.VoidPtr)
 
 
-def _relocate_err(ns: tuple[str, ...], name: tuple[str, ...]):
+def _relocate_err(ns: tuple[str, ...], name: tuple[str,
+                                                   ...]) -> tuple[str, ...]:
     if ns and name and name[0].lower() == "err":
         return (ns[0], name[0]) + ns[1:] + name[1:]
     return ns + name
 
 
-def _relocate_callback(ns: tuple[str, ...], name: tuple[str, ...]):
+def _relocate_callback(ns: tuple[str, ...],
+                       name: tuple[str, ...]) -> tuple[str, ...]:
     if ns and name and name[0].lower() == "callback":
         return (ns[0], name[0]) + ns[1:] + name[1:]
     return ns + name
@@ -96,14 +97,32 @@ class CythonDeclarations:
 
 
 @dataclass
+class CythonClass:
+    body: list[str] = field(default_factory=list)
+    callbacks: list[str] = field(default_factory=list)
+    init: list[str] = field(default_factory=list)
+
+    def finalize(self) -> list[str]:
+        if self.callbacks:
+            self.init.append(f"        install_handlers(self, self._ptr)")
+
+        return [*self.body, *self.callbacks, *self.init]
+
+
+@dataclass
 class CythonImplementation:
     prelude: list[str] = field(default_factory=list)
-    classes: list[str] = field(default_factory=list)
+    classes: OrderedDict[str, CythonClass] = field(default_factory=OrderedDict)
     handlers: list[str] = field(default_factory=list)
     install_handlers: list[str] = field(default_factory=list)
 
     def finalize(self) -> list[str]:
-        return self.prelude + self.handlers + self.install_handlers + self.classes
+        return [
+            *self.prelude,
+            *self.handlers,
+            *self.install_handlers,
+            *(l for cls in self.classes.values() for l in cls.finalize()),
+        ]
 
 
 @dataclass
@@ -112,9 +131,18 @@ class GenCython:
     pxd: CythonDeclarations = field(default_factory=CythonDeclarations)
     pyx: CythonImplementation = field(default_factory=CythonImplementation)
     in_class: Optional[apigen.Name] = None
+    in_class_name: str = ""
     enum_types: list[str] = field(default_factory=list)
 
-    def _add(self, lines: list[str], *added: str):
+    @property
+    def current_class(self) -> CythonClass:
+        if not self.in_class_name:
+            raise Exception("not in class")
+        if not self.in_class_name in self.pyx.classes:
+            raise Exception(f"class {self.in_class_name} not initialised")
+        return self.pyx.classes[self.in_class_name]
+
+    def _add(self, lines: list[str], *added: str) -> None:
         lines.extend(added)
 
     def make_typename(self, name: apigen.Name) -> str:
@@ -520,20 +548,20 @@ class GenCython:
             mods[basename + ".gen.pyx"] = "\n".join(self.pyx.finalize()) + "\n"
         return mods
 
-    def genModule(self, module: apigen.Module):
+    def genModule(self, module: apigen.Module) -> None:
         header = os.path.join("tox", os.path.basename(module.path))
         self._add(self.pxd.prelude, f'cdef extern from "{header}":')
         for decl in module.decls:
             self.genDecl(decl)
 
-    def genNamespace(self, decl: apigen.Namespace):
+    def genNamespace(self, decl: apigen.Namespace) -> None:
         ns = self.ns
         self.ns += tuple(decl.name)
         for mem in sorted(decl.mems, key=_order_types_first):
             self.genDecl(mem)
         self.ns = ns
 
-    def genEnumeration(self, decl: apigen.Enumeration):
+    def genEnumeration(self, decl: apigen.Enumeration) -> None:
         ty_name = self.make_typename(decl.name)
         self.enum_types.append(ty_name)
         self._add(self.pxd.enums, f"    cpdef enum {ty_name}:")
@@ -547,15 +575,19 @@ class GenCython:
             self.genEnumMember(mem)
         self.ns = ns
 
-    def genEnumMember(self, decl: apigen.EnumMember):
+    def genEnumMember(self, decl: apigen.EnumMember) -> None:
         self._add(self.pxd.enums,
                   f"        {_scream(self.ns, decl.name.name)}")
 
-    def genClassDecl(self, decl: apigen.ClassDecl):
+    def genClassDecl(self, decl: apigen.ClassDecl) -> None:
         if decl.name.name == ["System"]:
             return  # skip for now
 
         cls = self.make_typename(decl.name)
+
+        self.in_class = decl.name
+        self.in_class_name = cls
+
         self._add(self.pxd.typedefs, *(f"    ctypedef struct {cls}", ))
         self._add(
             self.pxd.classes,
@@ -565,8 +597,7 @@ class GenCython:
             f"    cdef {cls}* _ptr",
             f"    cdef {cls}* _get(self) except *",
         )
-        self._add(
-            self.pyx.classes,
+        self.pyx.classes[self.in_class_name] = CythonClass(body=[
             "",
             "",
             f"cdef class {cls}_Ptr:",
@@ -580,23 +611,22 @@ class GenCython:
             "",
             f"    def __enter__(self):",
             f"        return self",
-        )
+        ])
 
-        self.in_class = decl.name
         ns = self.ns
         self.ns += tuple(decl.name.name)
-        for mem in decl.mems:
+        for mem in sorted(decl.mems, key=_order_types_first):
             self.genDecl(mem)
         self.ns = ns
         self.in_class = None
 
-    def genProperty(self, decl: apigen.Property):
+    def genProperty(self, decl: apigen.Property) -> None:
         if isinstance(decl.prop, apigen.ValueProp):
             self.genValueProp(decl.prop, decl.name)
         elif isinstance(decl.prop, apigen.ArrayProp):
             self.genArrayProp(decl.prop, decl.name)
 
-    def genValueProp(self, decl: apigen.ValueProp, name: apigen.Name):
+    def genValueProp(self, decl: apigen.ValueProp, name: apigen.Name) -> None:
         if not self.in_class:
             raise Exception("method not in a class")
 
@@ -608,7 +638,7 @@ class GenCython:
         prop_name = _snake(_remove_self(self.in_class, name.ns), name.name)
 
         self._add(
-            self.pyx.classes,
+            self.current_class.body,
             "",
             f"    @property",
             f"    def {prop_name}(self) -> {prop_type}:",
@@ -619,25 +649,25 @@ class GenCython:
                 decl.type,
                 f"{self.make_identifier(decl.get.name)}(self._get())")
             self._add(
-                self.pyx.classes,
+                self.current_class.body,
                 f"        return {retval}",
             )
         else:
             self._add(
-                self.pyx.classes,
+                self.current_class.body,
                 f'        raise AttributeError("{prop_name} is write-only")',
             )
         if decl.set:
             self.genMethod(decl.set)
             self._add(
-                self.pyx.classes,
+                self.current_class.body,
                 "",
                 f"    @{prop_name}.setter",
                 f"    def {prop_name}(self, {prop_name}: {prop_type}):",
                 f"        {self.make_identifier(decl.set.name)}(self._get(), {prop_name})",
             )
 
-    def genArrayProp(self, decl: apigen.ArrayProp, name: apigen.Name):
+    def genArrayProp(self, decl: apigen.ArrayProp, name: apigen.Name) -> None:
         if decl.get:
             self.genMethod(decl.get)
         if decl.set:
@@ -645,7 +675,7 @@ class GenCython:
         if decl.size:
             self.genMethod(decl.size)
 
-    def genMethod(self, decl: apigen.Method):
+    def genMethod(self, decl: apigen.Method) -> None:
         if not self.in_class:
             raise Exception("method not in a class")
 
@@ -664,7 +694,7 @@ class GenCython:
         if is_callback:
             self.genCallbackMethod(decl, c_name)
 
-    def genCallbackMethod(self, decl: apigen.Method, c_name: str):
+    def genCallbackMethod(self, decl: apigen.Method, c_name: str) -> None:
         if not self.in_class:
             raise Exception("method not in a class")
 
@@ -686,7 +716,7 @@ class GenCython:
             f"        {c_name}(ptr, {handler}{maybe_self})",
         )
 
-    def genConstructor(self, decl: apigen.Constructor):
+    def genConstructor(self, decl: apigen.Constructor) -> None:
         if not self.in_class:
             raise Exception("not in class")
         class_ty = self.make_typename(self.in_class)
@@ -716,7 +746,7 @@ class GenCython:
         error_name = self.make_identifier(error_param.name)
         ok = error_ty.upper() + "_OK"
         self._add(
-            self.pyx.classes,
+            self.current_class.body,
             "",
             f"    cdef {class_ty}* _{name}({params}):",
             f"        cdef {error_ty} {error_name} = {ok}",
@@ -726,18 +756,13 @@ class GenCython:
         )
 
         self._add(
-            self.pyx.classes,
+            self.current_class.init,
             "",
             f"    def __init__({params}):",
             f"        self._ptr = self._{name}({', '.join(p[0] for p in cdef_params)})",
         )
-        if self.pxd.callbacks:
-            self._add(
-                self.pyx.classes,
-                f"        install_handlers(self, self._ptr)",
-            )
 
-    def genDestructor(self, decl: apigen.Destructor):
+    def genDestructor(self, decl: apigen.Destructor) -> None:
         if not self.in_class:
             raise Exception("not in class")
         id = self.make_identifier(decl.name)
@@ -746,7 +771,7 @@ class GenCython:
             f"    cdef void {id}({', '.join([self.make_typename(self.in_class) + '* ' + self.make_identifier(self.in_class)] + self.make_params(decl.params))})",
         )
         self._add(
-            self.pyx.classes,
+            self.current_class.body,
             "",
             f"    def __exit__(self, exc_type, exc_value, exc_traceback):",
             # not _get() because we can free as often as we want
@@ -754,16 +779,16 @@ class GenCython:
             f"        self._ptr = NULL",
         )
 
-    def genFunction(self, decl: apigen.Function):
+    def genFunction(self, decl: apigen.Function) -> None:
         self._add(
             self.pxd.funcs,
             f"    cdef {self.make_type(decl.ret)} {self.make_identifier(decl.name)}({', '.join(self.make_params(decl.params))})",
         )
 
-    def genDefine(self, decl: apigen.Define):
+    def genDefine(self, decl: apigen.Define) -> None:
         pass  # skip
 
-    def genCallbackTypeDecl(self, decl: apigen.CallbackTypeDecl):
+    def genCallbackTypeDecl(self, decl: apigen.CallbackTypeDecl) -> None:
         if not self.in_class:
             raise Exception("not in class")
         handler_type = self.make_identifier(decl.name)
@@ -778,19 +803,26 @@ class GenCython:
         if not self.pyx.handlers:
             self.pyx.handlers = ["", "cdef:"]
         params = self.make_handler_params(decl.params)
+        py_params = ", ".join(p[1] for p in params)
         self._add(
             self.pyx.handlers,
-            f"    void py_{handler}(self: {self.make_typename(self.in_class)}_Ptr, {', '.join(p[1] for p in params)}) except *:",
+            f"    void py_{handler}(self: {self.make_typename(self.in_class)}_Ptr, {py_params}) except *:",
             f"        self.{handler}({', '.join(p[0] for p in params)})",
             f"    void {handler}({', '.join(self.make_params(decl.params))}) except *:",
             f"        py_{handler}(<{self.make_typename(self.in_class)}_Ptr> user_data, {', '.join(self.make_handler_args(decl.params)[1:])})",
         )
+        if not self.current_class.callbacks:
+            self.current_class.callbacks = [""]
+        self._add(
+            self.current_class.callbacks,
+            f"    def {handler}(self, {py_params}) -> None: pass",
+        )
 
-    def genIdTypeDecl(self, decl: apigen.IdTypeDecl):
+    def genIdTypeDecl(self, decl: apigen.IdTypeDecl) -> None:
         self._add(self.pxd.typedefs,
                   f"    ctypedef uint32_t {self.make_typename(decl.name)}")
 
-    def genDecl(self, decl: apigen.Decl):
+    def genDecl(self, decl: apigen.Decl) -> None:
         if isinstance(decl, apigen.Namespace):
             self.genNamespace(decl)
         elif isinstance(decl, apigen.ClassDecl):
