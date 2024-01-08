@@ -498,7 +498,7 @@ class GenCython:
         if isinstance(size, apigen.Ref):
             if size.name.ns:
                 sizer = self.make_identifier(size.name)
-                return f'common._check_len("{id}", {id}, {sizer}())'
+                return f'common.check_len("{id}", {id}, {sizer}())'
             else:
                 return f"{id}, len({id})"
         raise Exception(f"unhandled type: {size}")
@@ -759,6 +759,7 @@ class GenCython:
             self.current_class.init,
             "",
             f"    def __init__({params}):",
+            f'        """Create new {class_ty} object."""',
             f"        self._ptr = self._{name}({', '.join(p[0] for p in cdef_params)})",
         )
 
