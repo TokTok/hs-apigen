@@ -537,6 +537,10 @@ class GenCython:
                 "# cython: language_level=3, linetrace=True",
                 "from array import array",
                 "from pytox import common",
+                "from types import TracebackType",
+                "from typing import TypeVar",
+                "",
+                'T = TypeVar("T")',
                 "",
                 "class ApiException(common.ApiException): pass",
             ])
@@ -606,10 +610,10 @@ class GenCython:
             f"            raise common.UseAfterFreeException()",
             f"        return self._ptr",
             "",
-            f"    def __dealloc__(self):",
+            f"    def __dealloc__(self) -> None:",
             f"        self.__exit__(None, None, None)",
             "",
-            f"    def __enter__(self):",
+            f"    def __enter__(self: T) -> T:",
             f"        return self",
         ])
 
@@ -774,7 +778,7 @@ class GenCython:
         self._add(
             self.current_class.body,
             "",
-            f"    def __exit__(self, exc_type, exc_value, exc_traceback):",
+            f"    def __exit__(self, exc_type: type[BaseException] | None, exc_value: BaseException | None, exc_traceback: TracebackType | None) -> None:",
             # not _get() because we can free as often as we want
             f"        {id}(self._ptr)",
             f"        self._ptr = NULL",
