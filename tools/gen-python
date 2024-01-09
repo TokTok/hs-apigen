@@ -542,7 +542,10 @@ class GenCython:
                 "",
                 'T = TypeVar("T")',
                 "",
-                "class ApiException(common.ApiException): pass",
+                "",
+                "class ApiException(common.ApiException):",
+                "    pass",
+                "",
             ])
             basename = os.path.splitext(module.path[len(basedir) + 1:])[0]
             if basename == "toxav/toxav":
@@ -755,7 +758,8 @@ class GenCython:
             f"    cdef {class_ty}* _{name}({params}):",
             f"        cdef {error_ty} {error_name} = {ok}",
             f"        cdef {class_ty}* ptr = {c_name}({', '.join(self.make_ccall_args(decl.params))})",
-            f"        if {error_name}: raise ApiException({error_ty}({error_name}))",
+            f"        if {error_name}:",
+            f"            raise ApiException({error_ty}({error_name}))",
             f"        return ptr",
         )
 
