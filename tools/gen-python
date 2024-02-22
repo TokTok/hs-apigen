@@ -613,7 +613,7 @@ class GenCython:
             f"            raise common.UseAfterFreeException()",
             f"        return self._ptr",
             "",
-            f"    def __dealloc__(self) -> None:",
+            f"    def __del__(self) -> None:",
             f"        self.__exit__(None, None, None)",
             "",
             f"    def __enter__(self: T) -> T:",
