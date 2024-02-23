@@ -529,7 +529,7 @@ class GenCython:
             self.pxd = CythonDeclarations(prelude=[
                 "# cython: language_level=3, linetrace=True",
                 "from libcpp cimport bool",
-                "from libc.stdint cimport uint8_t, uint16_t, uint32_t, uint64_t, int16_t, int32_t",
+                "from libc.stdint cimport uint8_t, uint16_t, uint32_t, uint64_t, int16_t, int32_t, int64_t",
                 "from libc.stdlib cimport malloc, free",
                 "",
             ])
@@ -637,6 +637,11 @@ class GenCython:
         if not self.in_class:
             raise Exception("method not in a class")
 
+        if decl.get:
+            self.genMethod(decl.get)
+        if decl.set:
+            self.genMethod(decl.set)
+
         if decl.get and decl.get.params or decl.set and len(
                 decl.set.params) != 1:
             return  # not supported yet
@@ -651,7 +656,6 @@ class GenCython:
             f"    def {prop_name}(self) -> {prop_type}:",
         )
         if decl.get:
-            self.genMethod(decl.get)
             retval = self.make_handler_type_conversion(
                 decl.type,
                 f"{self.make_identifier(decl.get.name)}(self._get())")
@@ -665,7 +669,6 @@ class GenCython:
                 f'        raise AttributeError("{prop_name} is write-only")',
             )
         if decl.set:
-            self.genMethod(decl.set)
             self._add(
                 self.current_class.body,
                 "",
