@@ -1,53 +1,55 @@
-{-# LANGUAGE LambdaCase        #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Strict            #-}
-{- HLINT ignore "Functor law" -}
-{- HLINT ignore "Use <$" -}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE Strict     #-}
 module Apigen.Language.PyDsl (generate) where
 
-import           Apigen.Parser.SymbolTable    (Name)
-import           Apigen.Types                 (BitSize (..), BuiltinType (..),
-                                               Constness (..), Decl (..),
-                                               Generated (..), Model (..),
-                                               Module (..))
-import           Data.Text                    (Text)
-import qualified Data.Text                    as Text
-import           Language.Cimple              (Lexeme (..), LexemeClass)
-import           Prelude                      hiding ((<$>))
-import           Text.PrettyPrint.ANSI.Leijen
+import           Apigen.Parser.SymbolTable (Name)
+import           Apigen.Types              (BitSize (..), BuiltinType (..),
+                                            Constness (..), Decl (..),
+                                            Generated (..), Model (..),
+                                            Module (..))
+import           Data.Text                 (Text)
+import qualified Data.Text                 as Text
+import qualified Data.Text.Lazy            as TL
+import           Language.Cimple           (Lexeme (..), LexemeClass)
+import           Prelude                   hiding ((<$>))
+import           Prettyprinter
+import           Prettyprinter.Render.Text as Term
 
-commaSpace :: Doc
+commaSpace :: Doc ()
 commaSpace = comma <> softline
 
-commaSep :: [Doc] -> [Doc]
+commaSep :: [Doc ()] -> [Doc ()]
 commaSep = punctuate commaSpace
 
-go :: ([Doc] -> Doc) -> String -> [Doc] -> Doc
+go :: ([Doc ()] -> Doc ()) -> String -> [Doc ()] -> Doc ()
 go f cls mems = ppCtor cls <> lparen <> f (commaSep mems) <> rparen
 
-ppCtor :: String -> Doc
-ppCtor = text . ("apigen." <>)
+ppCtor :: String -> Doc ()
+ppCtor = pretty . ("apigen." <>)
 
-hgo :: String -> [Doc] -> Doc
+hgo :: String -> [Doc ()] -> Doc ()
 hgo = go hcat
 
-vgo :: String -> [Doc] -> Doc
+vgo :: String -> [Doc ()] -> Doc ()
 vgo = go vcat
 
-ppList :: (a -> Doc) -> [a] -> Doc
-ppList pp l = lbracket <//> hcat (commaSep (map pp l)) <> rbracket
+linebreak :: Doc ()
+linebreak = group (flatAlt line mempty)
 
-ppModel :: Model (Lexeme Name) -> Doc
+ppList :: (a -> Doc ()) -> [a] -> Doc ()
+ppList pp l = lbracket <> linebreak <> hcat (commaSep (map pp l)) <> rbracket
+
+ppModel :: Model (Lexeme Name) -> Doc ()
 ppModel (Model mods) =
     vgo "Model" [ppList ppModule mods] <> line
 
-ppModule :: Module (Lexeme Name) -> Doc
+ppModule :: Module (Lexeme Name) -> Doc ()
 ppModule (Module file decls) =
-    vgo "Module" ["\"" <> text file <> "\"", ppList ppDecl decls]
+    vgo "Module" [pretty "\"" <> pretty file <> pretty "\"", ppList ppDecl decls]
 
-ppDecl :: Decl (Lexeme Name) -> Doc
+ppDecl :: Decl (Lexeme Name) -> Doc ()
 ppDecl = \case
-    Namespace name mems                     -> vgo "Namespace" [ppList (text . show) name, ppList ppDecl mems]
+    Namespace name mems                     -> vgo "Namespace" [ppList (pretty . show) name, ppList ppDecl mems]
     ClassDecl name mems                     -> vgo "ClassDecl" [ppLexeme name, ppList ppDecl mems]
     Enumeration funs name mems              -> vgo "Enumeration" [ppList ppGenerated funs, ppLexeme name, ppList ppDecl mems]
     Property name prop                      -> hgo "Property" [ppLexeme name, ppDecl prop]
@@ -83,14 +85,14 @@ ppDecl = \case
     Mul l r                                 -> hgo "Mul" [ppDecl l, ppDecl r]
     Div l r                                 -> hgo "Div" [ppDecl l, ppDecl r]
 
-ppConstness :: Constness -> Doc
-ppConstness ConstThis   = text "True"
-ppConstness MutableThis = text "False"
+ppConstness :: Constness -> Doc ()
+ppConstness ConstThis   = pretty "True"
+ppConstness MutableThis = pretty "False"
 
-ppGenerated :: Generated -> Doc
+ppGenerated :: Generated -> Doc ()
 ppGenerated = ppCtor . ("Generated." <>) . show
 
-ppBuiltinType :: BuiltinType -> Doc
+ppBuiltinType :: BuiltinType -> Doc ()
 ppBuiltinType Void      = ppCtor "Void"
 ppBuiltinType VoidPtr   = ppCtor "VoidPtr"
 ppBuiltinType Bool      = ppCtor "Bool"
@@ -100,31 +102,37 @@ ppBuiltinType (UInt bs) = hgo "UInt" [ppBitSize bs]
 ppBuiltinType SizeT     = ppCtor "SizeT"
 ppBuiltinType String    = ppCtor "String"
 
-ppBitSize :: BitSize -> Doc
+ppBitSize :: BitSize -> Doc ()
 ppBitSize B8  = int 8
 ppBitSize B16 = int 16
 ppBitSize B32 = int 32
 ppBitSize B64 = int 64
 
-ppMaybe :: (a -> Doc) -> Maybe a -> Doc
-ppMaybe _ Nothing  = text "None"
+ppMaybe :: (a -> Doc ()) -> Maybe a -> Doc ()
+ppMaybe _ Nothing  = pretty "None"
 ppMaybe f (Just x) = f x
 
-ppLexeme :: Lexeme Name -> Doc
+ppLexeme :: Lexeme Name -> Doc ()
 ppLexeme (L _ c s) = ppName c s
 
-ppName :: LexemeClass -> Name -> Doc
+ppName :: LexemeClass -> Name -> Doc ()
 ppName c (ns, name) = hgo "Name"
     [ ppCtor . ("LexemeClass." <>) . show $ c
-    , ppList (text . show) ns
-    , ppList (text . show) name
+    , ppList (pretty . show) ns
+    , ppList (pretty . show) name
     ]
 
-renderS :: Doc -> String
-renderS = flip displayS "" . renderSmart 1 120
 
-render :: Doc -> Text
-render = Text.pack . renderS
+renderSmart :: Float -> Int -> Doc () -> SimpleDocStream ()
+renderSmart ribbonFraction widthPerLine
+    = layoutSmart LayoutOptions
+        { layoutPageWidth = AvailablePerLine widthPerLine (realToFrac ribbonFraction) }
+
+render :: Doc () -> Text
+render = TL.toStrict . Term.renderLazy . renderSmart 1 120
 
 generate :: Model (Lexeme Name) -> Text
 generate = render . ppModel
+
+int :: Int -> Doc ()
+int = pretty

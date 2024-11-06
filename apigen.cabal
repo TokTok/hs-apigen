@@ -40,13 +40,14 @@ library
   build-depends:
       base            >=4       && <5
     , aeson
-    , ansi-wl-pprint
     , casing          <0.2
     , cimple          >=0.0.19
     , data-fix        <0.4
     , extra
     , insert-ordered-containers
     , mtl             <3
+    , prettyprinter
+    , prettyprinter-ansi-terminal
     , text            <3
     , unordered-containers
 
