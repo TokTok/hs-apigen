@@ -60,7 +60,8 @@ runSimplify decls = do
 go :: NodeF (Lexeme SId) [Sym] -> M a [Sym]
 -- {-
 go (PreprocInclude (L _ LitSysInclude _)) = return []
-go (TyPointer [ConstType (BuiltinType UInt{}) ]) = return []
+go (TyPointer [ConstType (BuiltinType UInt{})]) = return []
+go (TyPointer [           BuiltinType UInt{} ]) = return []
 go (VarDecl [] _ []) = return []
 go (FunctionPrototype [] _ _) = return []
 
@@ -78,6 +79,7 @@ go (EnumConsts (Just name) enums  ) = mkEnum name enums
 go (EnumDecl         name  enums _) = mkEnum name enums
 
 go (TyPointer [ConstType (BuiltinType Char)]) = return [BuiltinType String]
+go (TyPointer [           BuiltinType Char ]) = return [BuiltinType String]
 go (TyPointer [           Typename ty      ]) = return [     PointerType ty]
 go (TyPointer [ConstType (Typename ty     )]) = return [ConstPointerType ty]
 
@@ -151,7 +153,7 @@ go (CommentSection _ xs _)         = return $ concat xs
 go (ExternC xs)                    = return $ concat xs
 go Ellipsis                        = return []
 
-go x                               = error $ show x
+go x                               = error $ "parse failed: " <> show x
 
 mkEnum :: Lexeme SId -> [[Sym]] -> State (SIdToName, a) [Sym]
 mkEnum name enums = (:[]) . Enumeration [] name <$> ((stripNamespace . lexemeText $ name) . concat $ enums)

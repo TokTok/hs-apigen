@@ -429,7 +429,7 @@ class GenCython:
         if ty is apigen.SizeT:
             return c_name
         if ty is apigen.String:
-            return f"str({c_name})"
+            return f'{c_name}.decode("utf-8")'
         if isinstance(ty, apigen.SInt):
             return c_name
         if isinstance(ty, apigen.UInt):
@@ -464,8 +464,6 @@ class GenCython:
                 return "&" + id
             else:
                 return f"{id}._get() if {id} else NULL"
-        # if isinstance(ty, apigen.ConstPointerType):
-        #     return f"{self.make_typename(ty.type)}_Ptr"
         # if isinstance(ty, apigen.ArrayType):
         #     return self.make_ccall_array_ctype(ty.type)
         # if isinstance(ty, apigen.ConstArrayType):
@@ -510,7 +508,7 @@ class GenCython:
         if ty is apigen.SizeT:
             return self.make_identifier(name)
         if ty is apigen.String:
-            return self.make_identifier(name)
+            return f'{self.make_identifier(name)}.encode("utf-8")'
         if isinstance(ty, apigen.SInt):
             return self.make_identifier(name)
         if isinstance(ty, apigen.UInt):
@@ -531,6 +529,7 @@ class GenCython:
                 "from libcpp cimport bool",
                 "from libc.stdint cimport uint8_t, uint16_t, uint32_t, uint64_t, int16_t, int32_t, int64_t",
                 "from libc.stdlib cimport malloc, free",
+                "from typing import Optional",
                 "",
             ])
             self.pyx = CythonImplementation(prelude=[
@@ -538,10 +537,10 @@ class GenCython:
                 "from array import array",
                 "from pytox import common",
                 "from types import TracebackType",
+                "from typing import Optional",
                 "from typing import TypeVar",
                 "",
                 'T = TypeVar("T")',
-                "",
                 "",
                 "class ApiException(common.ApiException):",
                 "    pass",
@@ -648,6 +647,8 @@ class GenCython:
 
         prop_type = self.make_cdef_type(decl.type)
         prop_name = _snake(_remove_self(self.in_class, name.ns), name.name)
+        prop_expr = self.make_ccall_type_conversion(
+            decl.type, apigen.Name(name.kind, [], [prop_name]))
 
         self._add(
             self.current_class.body,
@@ -674,7 +675,7 @@ class GenCython:
                 "",
                 f"    @{prop_name}.setter",
                 f"    def {prop_name}(self, {prop_name}: {prop_type}):",
-                f"        {self.make_identifier(decl.set.name)}(self._get(), {prop_name})",
+                f"        {self.make_identifier(decl.set.name)}(self._get(), {prop_expr})",
             )
 
     def genArrayProp(self, decl: apigen.ArrayProp, name: apigen.Name) -> None:
