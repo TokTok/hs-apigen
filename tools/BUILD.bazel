@@ -3,7 +3,10 @@ load("@rules_haskell//haskell:defs.bzl", "haskell_binary")
 haskell_binary(
     name = "apigen",
     srcs = ["apigen.hs"],
-    tags = ["no-cross"],
+    tags = [
+        "haskell",
+        "no-cross",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         "//hs-apigen",
@@ -16,7 +19,10 @@ haskell_binary(
 haskell_binary(
     name = "dump-model",
     srcs = ["dump-model.hs"],
-    tags = ["no-cross"],
+    tags = [
+        "haskell",
+        "no-cross",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         "//hs-apigen",
