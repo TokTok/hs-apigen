@@ -59,13 +59,14 @@ runSimplify decls = do
 
 go :: NodeF (Lexeme SId) [Sym] -> M a [Sym]
 -- {-
-go (PreprocInclude (L _ LitSysInclude _)) = return []
+go (PreprocInclude _) = return []
 go (TyPointer [ConstType (BuiltinType UInt{})]) = return []
 go (TyPointer [           BuiltinType UInt{} ]) = return []
 go (VarDecl [] _ []) = return []
 go (FunctionPrototype [] _ _) = return []
 
 go (PreprocIfndef (L _ _ SYM_APIGEN_IGNORE) _ es) = return es
+go (PreprocIfndef (L _ _ SYM_TOX_HIDE_DEPRECATED) _ es) = return es
 
 go (FunctionPrototype [ret] name [[BuiltinType Void]]) = return [Function ret name []]
 go (FunctionPrototype [ret] name params              ) = return [Function ret name (concat params)]

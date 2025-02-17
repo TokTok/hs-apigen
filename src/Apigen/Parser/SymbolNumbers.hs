@@ -23,6 +23,7 @@ type TranslationUnit text = (FilePath, [Node (Lexeme text)])
 builtins :: NameToSId
 builtins = HashMap.fromList
     [ (([], ["APIGEN","IGNORE"]), SYM_APIGEN_IGNORE)
+    , (([], ["TOX","HIDE","DEPRECATED"]), SYM_TOX_HIDE_DEPRECATED)
     , (([], ["void"      ]), TY_void    )
     , (([], ["char"      ]), TY_char    )
     , (([], ["bool"      ]), TY_bool    )
